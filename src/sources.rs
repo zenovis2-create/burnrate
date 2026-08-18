@@ -20,11 +20,24 @@ pub struct Session {
     pub output_tokens: u64,
     pub cost_usd: f64,
     pub priced: bool,
+    pub reread_extras: u64,
+    pub top_reread_file: String,
+    pub top_reread_count: u64,
 }
 
 impl Session {
     pub fn total_tokens(&self) -> u64 {
         self.input_tokens + self.cache_write_tokens + self.cache_read_tokens + self.output_tokens
+    }
+
+    /// Share of input context served from cache re-reads (0..1).
+    pub fn reread_share(&self) -> f64 {
+        let inp = self.input_tokens + self.cache_read_tokens;
+        if inp == 0 {
+            0.0
+        } else {
+            self.cache_read_tokens as f64 / inp as f64
+        }
     }
 }
 
@@ -95,6 +108,7 @@ fn parse_claude(path: &Path) -> Option<Session> {
     let mut output: u64 = 0;
     let mut model = String::from("claude");
     let mut model_tokens: u64 = 0;
+    let mut read_files: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
 
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
@@ -158,10 +172,37 @@ fn parse_claude(path: &Path) -> Option<Session> {
                 model = m;
             }
             model_tokens += i + cw + cr + o;
+            if let Some(content) = msg.get("content").and_then(|c| c.as_array()) {
+                for item in content {
+                    if item.get("type").and_then(|x| x.as_str()) == Some("tool_use") {
+                        if item.get("name").and_then(|x| x.as_str()) == Some("Read") {
+                            if let Some(p) = item
+                                .get("input")
+                                .and_then(|i| i.get("file_path"))
+                                .and_then(|x| x.as_str())
+                            {
+                                *read_files.entry(p.to_string()).or_insert(0) += 1;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     let (cost_usd, priced) = pricing::cost(&model, input, cache_write, cache_read, output);
+    let mut reread_extras: u64 = 0;
+    let mut top_reread_file = String::new();
+    let mut top_reread_count: u64 = 0;
+    for (p, c) in &read_files {
+        if *c > 1 {
+            reread_extras += c - 1;
+        }
+        if *c > top_reread_count {
+            top_reread_count = *c;
+            top_reread_file = p.clone();
+        }
+    }
     Some(Session {
         source: "claude",
         id: id.unwrap_or_else(|| {
@@ -178,6 +219,9 @@ fn parse_claude(path: &Path) -> Option<Session> {
         output_tokens: output,
         cost_usd,
         priced,
+        reread_extras,
+        top_reread_file,
+        top_reread_count,
     })
 }
 
@@ -276,5 +320,8 @@ fn parse_codex(path: &Path) -> Option<Session> {
         output_tokens: output,
         cost_usd,
         priced,
+        reread_extras: 0,
+        top_reread_file: String::new(),
+        top_reread_count: 0,
     })
 }

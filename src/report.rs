@@ -65,21 +65,41 @@ pub fn print_table(sessions: Vec<Session>, days: i64) -> anyhow::Result<()> {
         }
     }
 
+    // waste: redundant file re-reads
+    let mut waste: Vec<&Session> = sessions.iter().filter(|s| s.reread_extras > 0).collect();
+    waste.sort_by(|a, b| b.reread_extras.cmp(&a.reread_extras));
+    if !waste.is_empty() {
+        println!("\ntop waste (agent re-reading the same file):");
+        for s in waste.iter().take(5) {
+            println!(
+                "  {} {:<6} {:<16} {} redundant re-reads  worst: {} x{}  (${:.2})",
+                fmt_date(s.started),
+                s.source,
+                s.model.chars().take(16).collect::<String>(),
+                s.reread_extras,
+                short_cwd(&s.top_reread_file).chars().take(30).collect::<String>(),
+                s.top_reread_count,
+                s.cost_usd
+            );
+        }
+    }
+
     let mut ranked: Vec<&Session> = sessions.iter().collect();
     ranked.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
     println!();
     println!(
-        "{:<12} {:<7} {:<18} {:>10} {:>11}  {}",
-        "WHEN", "SRC", "MODEL", "COST", "TOKENS", "CWD"
+        "{:<12} {:<7} {:<18} {:>10} {:>11} {:>8}  {}",
+        "WHEN", "SRC", "MODEL", "COST", "TOKENS", "RE-READ%", "CWD"
     );
     for s in ranked.iter().take(15) {
         println!(
-            "{:<12} {:<7} {:<18} {:>10.2} {:>11}  {}",
+            "{:<12} {:<7} {:<18} {:>10.2} {:>11} {:>7.0}%  {}",
             fmt_date(s.started),
             s.source,
             s.model.chars().take(18).collect::<String>(),
             s.cost_usd,
             s.total_tokens(),
+            s.reread_share() * 100.0,
             short_cwd(&s.cwd).chars().take(40).collect::<String>()
         );
     }
