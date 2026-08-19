@@ -58,10 +58,7 @@ fn move_selection(state: &mut TableState, len: usize, delta: isize) {
 pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
     let total_cost: f64 = sessions.iter().map(|s| s.cost_usd).sum();
     let redundant_reads: u64 = sessions.iter().map(|s| s.reread_extras).sum();
-    let total_input: u64 = sessions
-        .iter()
-        .map(|s| s.input_tokens + s.cache_read_tokens)
-        .sum();
+    let total_input: u64 = sessions.iter().map(Session::total_input_tokens).sum();
     let cached_input: u64 = sessions.iter().map(|s| s.cache_read_tokens).sum();
     let cache_pct = if total_input == 0 {
         0.0

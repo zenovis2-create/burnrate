@@ -53,6 +53,7 @@ intended for shell scripts, scheduled snapshots, and custom dashboards.
 
 - estimated API-rate cost by session and harness
 - input, cached-input, and output token totals
+- cache-write token totals when reported by the harness
 - cache share (reported separately from waste)
 - redundant Claude Code `Read` tool calls and the worst repeated file
 - the most expensive sessions first
@@ -70,7 +71,11 @@ intended for shell scripts, scheduled snapshots, and custom dashboards.
 
 Costs are estimates from a small hardcoded price table, not invoice data. Log
 formats and provider prices change; verify important numbers against your bill.
-Codex rollout files may repeat cumulative totals across forked threads.
+Recognized models use model-specific standard API rates; unrecognized usage is
+shown as unpriced and contributes $0 rather than borrowing another model's
+rate. Claude sessions that switch models are priced per model and display the
+model responsible for the most tokens. Codex rollout files may repeat
+cumulative totals across forked threads.
 
 Parsing happens locally and burnrate has no telemetry or network client.
 
@@ -93,6 +98,7 @@ Parsing happens locally and burnrate has no telemetry or network client.
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
+cargo audit --deny warnings
 ```
 
 Pull requests run these checks and release builds on Linux, macOS, and Windows.
