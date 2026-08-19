@@ -1,5 +1,8 @@
 # burnrate
 
+[![CI](https://github.com/zenovis2-create/burnrate/actions/workflows/ci.yml/badge.svg)](https://github.com/zenovis2-create/burnrate/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/zenovis2-create/burnrate)](https://github.com/zenovis2-create/burnrate/releases/latest)
+
 **`htop` for coding-agent spend.** See what Claude Code and Codex cost, which
 sessions burn the most tokens, and where agents keep reading the same files.
 
@@ -23,6 +26,7 @@ Prebuilt macOS, Linux, and Windows binaries are available on the
 
 ```sh
 burnrate report     # sessions ranked by estimated cost
+burnrate report --json > burnrate.json # machine-readable report
 burnrate tui        # interactive terminal dashboard
 burnrate --days 30  # widen the window
 burnrate --demo tui # try it with synthetic, privacy-safe data
@@ -32,6 +36,18 @@ burnrate automatically reads:
 
 - Claude Code: `~/.claude/projects/**/*.jsonl`
 - Codex: `~/.codex/sessions/**/*.jsonl`
+
+The `--days` window follows each session log's latest filesystem activity, so a
+long-running session is not dropped just because it started before the window.
+
+In the TUI, use the arrow keys or `j`/`k` to move, Page Up/Page Down to jump,
+Home/End to reach the edges, and `q` or Escape to quit.
+
+### JSON reports
+
+`burnrate report --json` returns the generation time, reporting window,
+aggregate totals, per-source totals, and cost-ranked session details. This is
+intended for shell scripts, scheduled snapshots, and custom dashboards.
 
 ## What it shows
 
@@ -69,7 +85,16 @@ Parsing happens locally and burnrate has no telemetry or network client.
 
 - Cursor and Gemini CLI parsers
 - editable price table
-- JSON output
 - package-manager installs
+
+## Development
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+```
+
+Pull requests run these checks and release builds on Linux, macOS, and Windows.
 
 MIT licensed.

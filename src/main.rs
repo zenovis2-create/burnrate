@@ -23,7 +23,11 @@ struct Cli {
 #[derive(clap::Subcommand)]
 enum Cmd {
     /// Print a cost report as a table (default action)
-    Report,
+    Report {
+        /// Emit machine-readable JSON instead of the table
+        #[arg(long)]
+        json: bool,
+    },
     /// Launch the TUI
     Tui,
 }
@@ -40,8 +44,9 @@ fn main() -> anyhow::Result<()> {
         report::filter_recent(sources::scan(since)?, since)
     };
 
-    match &cli.cmd {
+    match cli.cmd {
         Some(Cmd::Tui) => tui::run(sessions),
-        _ => report::print_table(sessions, days),
+        Some(Cmd::Report { json: true }) => report::print_json(&sessions, days, now),
+        Some(Cmd::Report { json: false }) | None => report::print_table(sessions, days),
     }
 }
