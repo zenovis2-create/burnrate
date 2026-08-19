@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Terminal,
 };
 
@@ -29,6 +29,30 @@ fn human_tokens(n: u64) -> String {
     } else {
         n.to_string()
     }
+}
+
+struct TerminalRestore;
+
+impl Drop for TerminalRestore {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+    }
+}
+
+fn move_selection(state: &mut TableState, len: usize, delta: isize) {
+    if len == 0 {
+        state.select(None);
+        return;
+    }
+
+    let current = state.selected().unwrap_or(0);
+    let next = if delta < 0 {
+        current.saturating_sub(delta.unsigned_abs())
+    } else {
+        current.saturating_add(delta as usize).min(len - 1)
+    };
+    state.select(Some(next));
 }
 
 pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
@@ -54,13 +78,24 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
     let mut ranked: Vec<&Session> = sessions.iter().collect();
     ranked.sort_by(|a, b| {
         b.cost_usd
-            .partial_cmp(&a.cost_usd)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&a.cost_usd)
+            .then_with(|| b.total_tokens().cmp(&a.total_tokens()))
+            .then_with(|| b.activity_at().cmp(&a.activity_at()))
+            .then_with(|| a.cwd.cmp(&b.cwd))
     });
+
+    let mut table_state = TableState::default();
+    if !ranked.is_empty() {
+        table_state.select(Some(0));
+    }
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    if let Err(error) = execute!(stdout, EnterAlternateScreen) {
+        let _ = disable_raw_mode();
+        return Err(error.into());
+    }
+    let _restore = TerminalRestore;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -121,7 +156,7 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
             frame.render_widget(summary, areas[0]);
 
             let header = Row::new([
-                "WHEN", "SRC", "MODEL", "COST", "TOKENS", "CACHE", "RE-READS", "PROJECT",
+                "ACTIVE", "SRC", "MODEL", "COST", "TOKENS", "CACHE", "RE-READS", "PROJECT",
             ])
             .style(
                 Style::default()
@@ -131,7 +166,7 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
             .bottom_margin(1);
             let rows = ranked.iter().map(|s| {
                 let when = s
-                    .started
+                    .activity_at()
                     .map(|d| d.format("%m-%d %H:%M").to_string())
                     .unwrap_or_else(|| "-".into());
                 let cost_style = if s.cost_usd >= 10.0 {
@@ -170,18 +205,25 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
             )
             .header(header)
             .column_spacing(1)
+            .row_highlight_style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("› ")
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::DarkGray))
                     .title(format!(" {} sessions · ranked by cost ", sessions.len())),
             );
-            frame.render_widget(table, areas[1]);
+            frame.render_stateful_widget(table, areas[1], &mut table_state);
 
             let footer = Paragraph::new(Line::from(vec![
                 Span::styled("local-only", Style::default().fg(Color::Green)),
                 Span::styled(
-                    "  ·  your logs never leave this machine  ·  q quit",
+                    "  ·  ↑/↓ or j/k move  ·  PgUp/PgDn jump  ·  q/Esc quit",
                     Style::default().fg(Color::DarkGray),
                 ),
             ]))
@@ -192,14 +234,53 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
 
         if event::poll(std::time::Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
-                if key.code == KeyCode::Char('q') {
-                    break Ok(());
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            move_selection(&mut table_state, ranked.len(), 1)
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            move_selection(&mut table_state, ranked.len(), -1)
+                        }
+                        KeyCode::PageDown => move_selection(&mut table_state, ranked.len(), 10),
+                        KeyCode::PageUp => move_selection(&mut table_state, ranked.len(), -10),
+                        KeyCode::Home if !ranked.is_empty() => table_state.select(Some(0)),
+                        KeyCode::End if !ranked.is_empty() => {
+                            table_state.select(Some(ranked.len() - 1))
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
     };
 
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    disable_raw_mode()?;
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selection_is_clamped_to_the_available_rows() {
+        let mut state = TableState::default();
+
+        move_selection(&mut state, 3, 1);
+        assert_eq!(state.selected(), Some(1));
+        move_selection(&mut state, 3, 10);
+        assert_eq!(state.selected(), Some(2));
+        move_selection(&mut state, 3, -10);
+        assert_eq!(state.selected(), Some(0));
+    }
+
+    #[test]
+    fn empty_table_has_no_selection() {
+        let mut state = TableState::default().with_selected(Some(4));
+
+        move_selection(&mut state, 0, 1);
+
+        assert_eq!(state.selected(), None);
+    }
 }

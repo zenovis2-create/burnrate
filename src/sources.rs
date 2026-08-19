@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -7,10 +8,12 @@ use std::path::{Path, PathBuf};
 
 use crate::pricing;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Session {
     pub source: &'static str, // "claude" | "codex"
     pub started: Option<DateTime<Utc>>,
+    /// Last filesystem activity observed for the session log.
+    pub updated: Option<DateTime<Utc>>,
     pub cwd: String,
     pub model: String,
     pub input_tokens: u64,
@@ -25,6 +28,10 @@ pub struct Session {
 }
 
 impl Session {
+    pub fn activity_at(&self) -> Option<DateTime<Utc>> {
+        self.updated.as_ref().or(self.started.as_ref()).copied()
+    }
+
     pub fn total_tokens(&self) -> u64 {
         self.input_tokens + self.cache_write_tokens + self.cache_read_tokens + self.output_tokens
     }
@@ -47,6 +54,7 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
         Session {
             source: "claude",
             started: Some(now - chrono::Duration::hours(2)),
+            updated: Some(now - chrono::Duration::hours(2)),
             cwd: "/work/checkout".into(),
             model: "claude-opus-4-1".into(),
             input_tokens: 1_420_000,
@@ -62,6 +70,7 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
         Session {
             source: "codex",
             started: Some(now - chrono::Duration::hours(8)),
+            updated: Some(now - chrono::Duration::hours(8)),
             cwd: "/work/api".into(),
             model: "gpt-5-codex".into(),
             input_tokens: 2_870_000,
@@ -77,6 +86,7 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
         Session {
             source: "claude",
             started: Some(now - chrono::Duration::days(1)),
+            updated: Some(now - chrono::Duration::days(1)),
             cwd: "/work/dashboard".into(),
             model: "claude-sonnet-4".into(),
             input_tokens: 780_000,
@@ -92,6 +102,7 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
         Session {
             source: "claude",
             started: Some(now - chrono::Duration::days(2)),
+            updated: Some(now - chrono::Duration::days(2)),
             cwd: "/work/mobile".into(),
             model: "claude-sonnet-4".into(),
             input_tokens: 510_000,
@@ -107,6 +118,7 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
         Session {
             source: "codex",
             started: Some(now - chrono::Duration::days(3)),
+            updated: Some(now - chrono::Duration::days(3)),
             cwd: "/work/docs".into(),
             model: "gpt-5-codex".into(),
             input_tokens: 390_000,
@@ -129,7 +141,8 @@ pub fn scan(since: DateTime<Utc>) -> Result<Vec<Session>> {
         let claude = home.join(".claude").join("projects");
         if claude.exists() {
             for f in jsonl_files_touched_since(&claude, since) {
-                if let Some(s) = parse_claude(&f) {
+                if let Some(mut s) = parse_claude(&f.path) {
+                    s.updated = Some(f.updated);
                     out.push(s);
                 }
             }
@@ -137,7 +150,8 @@ pub fn scan(since: DateTime<Utc>) -> Result<Vec<Session>> {
         let codex = home.join(".codex").join("sessions");
         if codex.exists() {
             for f in jsonl_files_touched_since(&codex, since) {
-                if let Some(s) = parse_codex(&f) {
+                if let Some(mut s) = parse_codex(&f.path) {
+                    s.updated = Some(f.updated);
                     out.push(s);
                 }
             }
@@ -146,7 +160,12 @@ pub fn scan(since: DateTime<Utc>) -> Result<Vec<Session>> {
     Ok(out)
 }
 
-fn jsonl_files_touched_since(root: &Path, since: DateTime<Utc>) -> Vec<PathBuf> {
+struct LogFile {
+    path: PathBuf,
+    updated: DateTime<Utc>,
+}
+
+fn jsonl_files_touched_since(root: &Path, since: DateTime<Utc>) -> Vec<LogFile> {
     let mut stack = vec![root.to_path_buf()];
     let mut files = Vec::new();
     while let Some(dir) = stack.pop() {
@@ -156,17 +175,27 @@ fn jsonl_files_touched_since(root: &Path, since: DateTime<Utc>) -> Vec<PathBuf> 
         };
         for e in rd.flatten() {
             let p = e.path();
-            let mt = e
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .map(DateTime::<Utc>::from);
-            if p.is_dir() {
+            let file_type = match e.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+            if file_type.is_dir() {
                 stack.push(p);
-            } else if p.extension().map(|x| x == "jsonl").unwrap_or(false)
-                && mt.map(|t| t >= since).unwrap_or(false)
+            } else if file_type.is_file()
+                && p.extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x.eq_ignore_ascii_case("jsonl"))
+                    .unwrap_or(false)
             {
-                files.push(p);
+                let updated = match e
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .map(DateTime::<Utc>::from)
+                {
+                    Ok(updated) if updated >= since => updated,
+                    _ => continue,
+                };
+                files.push(LogFile { path: p, updated });
             }
         }
     }
@@ -283,6 +312,7 @@ fn parse_claude(path: &Path) -> Option<Session> {
     Some(Session {
         source: "claude",
         started,
+        updated: None,
         cwd: cwd.unwrap_or_default(),
         model,
         input_tokens: input,
@@ -369,6 +399,7 @@ fn parse_codex(path: &Path) -> Option<Session> {
     Some(Session {
         source: "codex",
         started,
+        updated: None,
         cwd: cwd.unwrap_or_default(),
         model: if model.is_empty() {
             String::from("codex")
