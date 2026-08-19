@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -33,12 +34,18 @@ impl Session {
     }
 
     pub fn total_tokens(&self) -> u64 {
-        self.input_tokens + self.cache_write_tokens + self.cache_read_tokens + self.output_tokens
+        self.total_input_tokens().saturating_add(self.output_tokens)
+    }
+
+    pub fn total_input_tokens(&self) -> u64 {
+        self.input_tokens
+            .saturating_add(self.cache_write_tokens)
+            .saturating_add(self.cache_read_tokens)
     }
 
     /// Share of input context served from the provider cache (0..1).
     pub fn cache_share(&self) -> f64 {
-        let inp = self.input_tokens + self.cache_read_tokens;
+        let inp = self.total_input_tokens();
         if inp == 0 {
             0.0
         } else {
@@ -50,7 +57,7 @@ impl Session {
 /// Deterministic, synthetic sessions used to record public demos without
 /// exposing local project names or log contents.
 pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
-    vec![
+    let mut sessions = vec![
         Session {
             source: "claude",
             started: Some(now - chrono::Duration::hours(2)),
@@ -61,8 +68,8 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
             cache_write_tokens: 340_000,
             cache_read_tokens: 2_260_000,
             output_tokens: 238_000,
-            cost_usd: 18.47,
-            priced: true,
+            cost_usd: 0.0,
+            priced: false,
             reread_extras: 31,
             top_reread_file: "/work/checkout/package-lock.json".into(),
             top_reread_count: 12,
@@ -77,8 +84,8 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
             cache_write_tokens: 0,
             cache_read_tokens: 4_040_000,
             output_tokens: 694_000,
-            cost_usd: 12.86,
-            priced: true,
+            cost_usd: 0.0,
+            priced: false,
             reread_extras: 0,
             top_reread_file: String::new(),
             top_reread_count: 0,
@@ -93,8 +100,8 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
             cache_write_tokens: 210_000,
             cache_read_tokens: 1_310_000,
             output_tokens: 176_000,
-            cost_usd: 8.31,
-            priced: true,
+            cost_usd: 0.0,
+            priced: false,
             reread_extras: 19,
             top_reread_file: "/work/dashboard/schema.graphql".into(),
             top_reread_count: 9,
@@ -109,8 +116,8 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
             cache_write_tokens: 130_000,
             cache_read_tokens: 670_000,
             output_tokens: 121_000,
-            cost_usd: 5.24,
-            priced: true,
+            cost_usd: 0.0,
+            priced: false,
             reread_extras: 13,
             top_reread_file: "/work/mobile/pnpm-lock.yaml".into(),
             top_reread_count: 7,
@@ -125,13 +132,24 @@ pub fn demo_sessions(now: DateTime<Utc>) -> Vec<Session> {
             cache_write_tokens: 0,
             cache_read_tokens: 610_000,
             output_tokens: 83_000,
-            cost_usd: 2.24,
-            priced: true,
+            cost_usd: 0.0,
+            priced: false,
             reread_extras: 0,
             top_reread_file: String::new(),
             top_reread_count: 0,
         },
-    ]
+    ];
+
+    for session in &mut sessions {
+        (session.cost_usd, session.priced) = pricing::cost(
+            &session.model,
+            session.input_tokens,
+            session.cache_write_tokens,
+            session.cache_read_tokens,
+            session.output_tokens,
+        );
+    }
+    sessions
 }
 
 /// Scan Claude Code + Codex logs touched since `since`.
@@ -208,6 +226,30 @@ fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
         .map(|d| d.with_timezone(&Utc))
 }
 
+#[derive(Default)]
+struct ModelUsage {
+    input: u64,
+    cache_write: u64,
+    cache_read: u64,
+    output: u64,
+}
+
+impl ModelUsage {
+    fn add(&mut self, input: u64, cache_write: u64, cache_read: u64, output: u64) {
+        self.input = self.input.saturating_add(input);
+        self.cache_write = self.cache_write.saturating_add(cache_write);
+        self.cache_read = self.cache_read.saturating_add(cache_read);
+        self.output = self.output.saturating_add(output);
+    }
+
+    fn total_tokens(&self) -> u64 {
+        self.input
+            .saturating_add(self.cache_write)
+            .saturating_add(self.cache_read)
+            .saturating_add(self.output)
+    }
+}
+
 /// Claude Code: ~/.claude/projects/<proj>/<session>.jsonl
 /// Assistant lines carry message.model + message.usage.
 fn parse_claude(path: &Path) -> Option<Session> {
@@ -217,9 +259,8 @@ fn parse_claude(path: &Path) -> Option<Session> {
     let mut cache_write: u64 = 0;
     let mut cache_read: u64 = 0;
     let mut output: u64 = 0;
-    let mut model = String::from("claude");
-    let mut model_tokens: u64 = 0;
-    let mut read_files: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut model_usage: BTreeMap<String, ModelUsage> = BTreeMap::new();
+    let mut read_files: HashMap<String, u64> = HashMap::new();
 
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
@@ -270,14 +311,11 @@ fn parse_claude(path: &Path) -> Option<Session> {
                 .and_then(|x| x.as_u64())
                 .unwrap_or(0);
             let o = u.get("output_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
-            input += i;
-            cache_write += cw;
-            cache_read += cr;
-            output += o;
-            if model_tokens == 0 {
-                model = m;
-            }
-            model_tokens += i + cw + cr + o;
+            input = input.saturating_add(i);
+            cache_write = cache_write.saturating_add(cw);
+            cache_read = cache_read.saturating_add(cr);
+            output = output.saturating_add(o);
+            model_usage.entry(m).or_default().add(i, cw, cr, o);
             if let Some(content) = msg.get("content").and_then(|c| c.as_array()) {
                 for item in content {
                     if item.get("type").and_then(|x| x.as_str()) == Some("tool_use")
@@ -288,7 +326,8 @@ fn parse_claude(path: &Path) -> Option<Session> {
                             .and_then(|i| i.get("file_path"))
                             .and_then(|x| x.as_str())
                         {
-                            *read_files.entry(p.to_string()).or_insert(0) += 1;
+                            let count = read_files.entry(p.to_string()).or_insert(0);
+                            *count = count.saturating_add(1);
                         }
                     }
                 }
@@ -296,13 +335,31 @@ fn parse_claude(path: &Path) -> Option<Session> {
         }
     }
 
-    let (cost_usd, priced) = pricing::cost(&model, input, cache_write, cache_read, output);
+    // Claude Code can switch models inside one session. Price each model's
+    // usage independently and display the model responsible for most tokens.
+    let model = model_usage
+        .iter()
+        .max_by_key(|(_, usage)| usage.total_tokens())
+        .map(|(model, _)| model.clone())?;
+    let mut cost_usd = 0.0;
+    let mut priced = true;
+    for (model, usage) in &model_usage {
+        let (model_cost, model_priced) = pricing::cost(
+            model,
+            usage.input,
+            usage.cache_write,
+            usage.cache_read,
+            usage.output,
+        );
+        cost_usd += model_cost;
+        priced &= model_priced;
+    }
     let mut reread_extras: u64 = 0;
     let mut top_reread_file = String::new();
     let mut top_reread_count: u64 = 0;
     for (p, c) in &read_files {
         if *c > 1 {
-            reread_extras += c - 1;
+            reread_extras = reread_extras.saturating_add(c - 1);
         }
         if *c > top_reread_count {
             top_reread_count = *c;
@@ -333,7 +390,9 @@ fn parse_codex(path: &Path) -> Option<Session> {
     let mut cwd: Option<String> = None;
     let mut started: Option<DateTime<Utc>> = None;
     let mut model = String::new();
-    let mut total: Option<(u64, u64, u64)> = None; // (input_incl_cached, cached, output)
+    // Codex input_tokens includes cached and cache-write tokens. Normalize the
+    // final tuple into mutually exclusive buckets before pricing it.
+    let mut total: Option<(u64, u64, u64, u64)> = None;
 
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
@@ -371,8 +430,12 @@ fn parse_codex(path: &Path) -> Option<Session> {
                                 .get("cached_input_tokens")
                                 .and_then(|x| x.as_u64())
                                 .unwrap_or(0);
+                            let cw = t
+                                .get("cache_write_input_tokens")
+                                .and_then(|x| x.as_u64())
+                                .unwrap_or(0);
                             let o = t.get("output_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
-                            total = Some((i, c, o));
+                            total = Some((i, c, cw, o));
                         }
                     }
                 }
@@ -393,9 +456,11 @@ fn parse_codex(path: &Path) -> Option<Session> {
         }
     }
 
-    let (input_total, cached, output) = total?;
-    let input = input_total.saturating_sub(cached);
-    let (cost_usd, priced) = pricing::cost(&model, input, 0, cached, output);
+    let (input_total, cached, cache_write, output) = total?;
+    let input = input_total
+        .saturating_sub(cached)
+        .saturating_sub(cache_write);
+    let (cost_usd, priced) = pricing::cost(&model, input, cache_write, cached, output);
     Some(Session {
         source: "codex",
         started,
@@ -407,7 +472,7 @@ fn parse_codex(path: &Path) -> Option<Session> {
             model
         },
         input_tokens: input,
-        cache_write_tokens: 0,
+        cache_write_tokens: cache_write,
         cache_read_tokens: cached,
         output_tokens: output,
         cost_usd,
@@ -461,7 +526,7 @@ mod tests {
             "\n",
             r#"{"timestamp":"2026-08-19T00:01:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":100}}}}"#,
             "\n",
-            r#"{"timestamp":"2026-08-19T00:02:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":700,"output_tokens":220}}}}"#,
+            r#"{"timestamp":"2026-08-19T00:02:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":700,"cache_write_input_tokens":300,"output_tokens":220}}}}"#,
             "\n"
         );
         let path = temp_jsonl("codex", contents);
@@ -471,19 +536,67 @@ mod tests {
 
         assert_eq!(session.cwd, "/work/api");
         assert_eq!(session.model, "gpt-5-codex");
-        assert_eq!(session.input_tokens, 1100);
+        assert_eq!(session.input_tokens, 800);
         assert_eq!(session.cache_read_tokens, 700);
+        assert_eq!(session.cache_write_tokens, 300);
         assert_eq!(session.output_tokens, 220);
         assert!(session.priced);
     }
 
     #[test]
-    fn demo_is_deterministic_and_totals_47_12() {
+    fn prices_each_model_in_a_mixed_claude_session() {
+        let opus = r#"{"type":"assistant","message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000000,"output_tokens":0}}}"#;
+        let sonnet = r#"{"type":"assistant","message":{"model":"claude-sonnet-4","usage":{"input_tokens":0,"output_tokens":2000000}}}"#;
+        let path = temp_jsonl("claude-mixed-model", &format!("{opus}\n{sonnet}\n"));
+
+        let session = parse_claude(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(session.model, "claude-sonnet-4");
+        assert!((session.cost_usd - 45.0).abs() < f64::EPSILON);
+        assert!(session.priced);
+    }
+
+    #[test]
+    fn skips_claude_logs_without_assistant_usage() {
+        let path = temp_jsonl(
+            "claude-no-usage",
+            r#"{"type":"user","cwd":"/work/app","message":{"content":"hello"}}"#,
+        );
+
+        let session = parse_claude(&path);
+        std::fs::remove_file(path).unwrap();
+
+        assert!(session.is_none());
+    }
+
+    #[test]
+    fn demo_costs_are_derived_from_the_price_table() {
         let now = Utc::now();
         let sessions = demo_sessions(now);
         let total: f64 = sessions.iter().map(|s| s.cost_usd).sum();
+
         assert_eq!(sessions.len(), 5);
-        assert!((total - 47.12).abs() < 0.000_001);
+        for session in &sessions {
+            let (expected, priced) = pricing::cost(
+                &session.model,
+                session.input_tokens,
+                session.cache_write_tokens,
+                session.cache_read_tokens,
+                session.output_tokens,
+            );
+            assert!((session.cost_usd - expected).abs() < f64::EPSILON);
+            assert_eq!(session.priced, priced);
+        }
+        assert!((total - 71.53525).abs() < 0.000_001);
         assert_eq!(sessions.iter().map(|s| s.reread_extras).sum::<u64>(), 63);
+    }
+
+    #[test]
+    fn cache_share_counts_cache_writes_as_uncached_input() {
+        let session = &demo_sessions(Utc::now())[0];
+        let expected = 2_260_000.0 / (1_420_000.0 + 340_000.0 + 2_260_000.0);
+
+        assert!((session.cache_share() - expected).abs() < f64::EPSILON);
     }
 }

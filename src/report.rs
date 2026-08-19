@@ -133,7 +133,7 @@ pub fn print_table(sessions: Vec<Session>, days: i64) -> anyhow::Result<()> {
     );
     if unpriced > 0 {
         println!(
-            "( {} sessions had unpriced models — counted as $0 )",
+            "( {} sessions included unpriced model usage — that usage counted as $0 )",
             unpriced
         );
     }
