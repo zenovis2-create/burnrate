@@ -1,50 +1,75 @@
 # burnrate
 
-**htop for coding-agent spend.**
+**`htop` for coding-agent spend.** See what Claude Code and Codex cost, which
+sessions burn the most tokens, and where agents keep reading the same files.
 
-Your coding agent just told you "done." burnrate tells you what it cost.
+![burnrate terminal demo](assets/demo.gif)
 
-Point it at your Claude Code / Codex logs and see, in a live TUI:
+Local-only: burnrate reads the logs already on your machine. Nothing is uploaded.
 
-- dollars burned — this session, today, this week
-- tokens wasted on re-reads and cache churn
-- which model each session actually ran
-- a one-line verdict: *this session cost $4.12 and 61% of it was the agent re-reading `package-lock.json`*
-
-Local-only. Your logs never leave the machine.
+If burnrate helps you catch an expensive agent loop, please **star the repo** so
+other builders can find it.
 
 ## Install
 
 ```sh
-# coming soon — GitHub Releases + brew tap
 cargo install --git https://github.com/zenovis2-create/burnrate
 ```
 
-## Usage
+Prebuilt macOS, Linux, and Windows binaries are available on the
+[latest release](https://github.com/zenovis2-create/burnrate/releases/latest).
+
+## Use
 
 ```sh
-burnrate            # TUI — sessions ranked by cost
-burnrate report     # plain-text table (default)
+burnrate report     # sessions ranked by estimated cost
+burnrate tui        # interactive terminal dashboard
 burnrate --days 30  # widen the window
+burnrate --demo tui # try it with synthetic, privacy-safe data
 ```
+
+burnrate automatically reads:
+
+- Claude Code: `~/.claude/projects/**/*.jsonl`
+- Codex: `~/.codex/sessions/**/*.jsonl`
+
+## What it shows
+
+- estimated API-rate cost by session and harness
+- input, cached-input, and output token totals
+- cache share (reported separately from waste)
+- redundant Claude Code `Read` tool calls and the worst repeated file
+- the most expensive sessions first
+
+## Support
+
+| Harness | Spend | Cache | Repeated file reads |
+| --- | --- | --- | --- |
+| Claude Code | yes | yes | yes |
+| Codex | yes | yes | not yet |
+| Cursor | planned | planned | planned |
+| Gemini CLI | planned | planned | planned |
+
+## Accuracy and privacy
+
+Costs are estimates from a small hardcoded price table, not invoice data. Log
+formats and provider prices change; verify important numbers against your bill.
+Codex rollout files may repeat cumulative totals across forked threads.
+
+Parsing happens locally and burnrate has no telemetry or network client.
 
 ## What this is not
 
 - not a memory server
-- not an ADE (agent development environment)
+- not an agent development environment
 - not an MCP kitchen sink
-- not a cloud service
+- not a cloud billing service
 
-It is a thin, fast, local cost lens on logs you already have.
+## Roadmap
 
-## Status
+- Cursor and Gemini CLI parsers
+- editable price table
+- JSON output
+- package-manager installs
 
-v0.1 — Claude Code + Codex parsers, price table (approximate, hardcoded), TUI.
-Cursor / Gemini CLI parsers, waste detector, `report --json`, and `prices pull` are next.
-
-**v0 caveat:** Codex rollout files re-report cumulative thread totals, so fork chains
-count the shared history once per fork. Numbers are API-rate estimates, not bills.
-
-## License
-
-MIT
+MIT licensed.

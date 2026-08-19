@@ -12,6 +12,10 @@ struct Cli {
     #[arg(long, default_value_t = 7)]
     days: u32,
 
+    /// Use synthetic sessions (handy for screenshots and trying the UI)
+    #[arg(long)]
+    demo: bool,
+
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -30,8 +34,11 @@ fn main() -> anyhow::Result<()> {
     let now = chrono::Utc::now();
     let since = now - chrono::Duration::days(days);
 
-    let sessions = sources::scan(since)?;
-    let sessions = report::filter_recent(sessions, since);
+    let sessions = if cli.demo {
+        sources::demo_sessions(now)
+    } else {
+        report::filter_recent(sources::scan(since)?, since)
+    };
 
     match &cli.cmd {
         Some(Cmd::Tui) => tui::run(sessions),

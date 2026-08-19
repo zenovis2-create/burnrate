@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>burnrate demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { width: 1140px; height: 560px; margin: 0; overflow: hidden; }
+  body { background: #0b0e14; color: #d8dee9; font: 15px/1.35 "Cascadia Mono", Consolas, monospace; padding: 26px; }
+  .window { height: 508px; border: 1px solid #343b4c; border-radius: 10px; overflow: hidden; box-shadow: 0 18px 50px #0009; background: #11151d; }
+  .bar { height: 34px; background: #1b202b; border-bottom: 1px solid #343b4c; display: flex; align-items: center; padding: 0 13px; gap: 8px; color: #697386; font-size: 12px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; } .red { background: #ff5f57; } .yellow { background: #febc2e; } .green { background: #28c840; }
+  .title { margin-left: auto; margin-right: auto; transform: translateX(-28px); }
+  .terminal { padding: 14px 18px; }
+  .prompt { color: #7ee787; margin-bottom: 11px; } .prompt b { color: #c9d1d9; font-weight: 500; }
+  .card, .table { border: 1px solid #343b4c; position: relative; margin-top: 8px; }
+  .legend { position: absolute; top: -10px; left: 13px; background: #11151d; padding: 0 7px; color: #ff6b6b; font-weight: 700; }
+  .metrics { display: flex; gap: 38px; padding: 14px 18px 8px; align-items: baseline; }
+  .metric strong { font-size: 25px; margin-right: 8px; } .money { color: #ff6b6b; } .reads { color: #f7c948; } .cache { color: #5ccfe6; }
+  .metric span, .offender-label { color: #798294; }
+  .offender { padding: 0 18px 11px; } .offender strong { color: #f7c948; }
+  .table { padding: 14px 12px 9px; }
+  .table .legend { color: #c9d1d9; font-weight: 500; }
+  .row { display: grid; grid-template-columns: 105px 65px 176px 82px 87px 72px 92px 1fr; gap: 5px; padding: 4px 7px; white-space: nowrap; }
+  .head { color: #5ccfe6; font-weight: 700; border-bottom: 1px solid #2b3240; padding-bottom: 7px; margin-bottom: 2px; }
+  .hot { color: #ff6b6b; font-weight: 700; } .warn { color: #f7c948; } .muted { color: #697386; }
+  .footer { text-align: center; color: #697386; padding-top: 9px; } .footer strong { color: #7ee787; }
+  [data-step] { transition: none; }
+</style>
+<div class="window">
+  <div class="bar"><i class="dot red"></i><i class="dot yellow"></i><i class="dot green"></i><span class="title">burnrate — synthetic demo</span></div>
+  <div class="terminal">
+    <div class="prompt">❯ <b>burnrate --demo tui</b><span id="cursor">█</span></div>
+    <div class="card" data-step="1">
+      <span class="legend">burnrate — htop for coding-agent spend</span>
+      <div class="metrics">
+        <div class="metric"><strong class="money">$47.12</strong><span>spent</span></div>
+        <div class="metric"><strong class="reads">63</strong><span>redundant reads</span></div>
+        <div class="metric"><strong class="cache">60%</strong><span>cached input</span></div>
+      </div>
+      <div class="offender"><span class="offender-label">top offender&nbsp; </span><strong>package-lock.json ×12</strong></div>
+    </div>
+    <div class="table" data-step="1">
+      <span class="legend">5 sessions · ranked by cost</span>
+      <div class="row head"><span>WHEN</span><span>SRC</span><span>MODEL</span><span>COST</span><span>TOKENS</span><span>CACHE</span><span>RE-READS</span><span>PROJECT</span></div>
+      <div class="row" data-step="2"><span>08-19 11:34</span><span>claude</span><span>claude-opus-4-1</span><span class="hot">$18.47</span><span>4.3M</span><span>61%</span><span class="warn">31</span><span>checkout</span></div>
+      <div class="row" data-step="2"><span>08-19 05:34</span><span>codex</span><span>gpt-5-codex</span><span class="hot">$12.86</span><span>7.6M</span><span>58%</span><span class="muted">0</span><span>api</span></div>
+      <div class="row" data-step="3"><span>08-18 13:34</span><span>claude</span><span>claude-sonnet-4</span><span>$8.31</span><span>2.5M</span><span>63%</span><span class="warn">19</span><span>dashboard</span></div>
+      <div class="row" data-step="3"><span>08-17 13:34</span><span>claude</span><span>claude-sonnet-4</span><span>$5.24</span><span>1.4M</span><span>57%</span><span class="warn">13</span><span>mobile</span></div>
+      <div class="row" data-step="3"><span>08-16 13:34</span><span>codex</span><span>gpt-5-codex</span><span>$2.24</span><span>1.1M</span><span>61%</span><span class="muted">0</span><span>docs</span></div>
+    </div>
+    <div class="footer" data-step="1"><strong>local-only</strong> · your logs never leave this machine · q quit</div>
+  </div>
+</div>
+<script>
+  const frame = Number(new URLSearchParams(location.search).get("frame") || 3);
+  document.querySelectorAll("[data-step]").forEach((node) => {
+    if (Number(node.dataset.step) > frame) node.style.visibility = "hidden";
+  });
+  document.querySelector("#cursor").style.visibility = frame === 0 ? "visible" : "hidden";
+</script>
+</html>

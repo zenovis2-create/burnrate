@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
 use crate::sources::Session;
+use chrono::{DateTime, Utc};
 
 pub fn filter_recent(sessions: Vec<Session>, since: DateTime<Utc>) -> Vec<Session> {
     sessions
@@ -45,7 +45,10 @@ pub fn print_table(sessions: Vec<Session>, days: i64) -> anyhow::Result<()> {
         human_tok(total_tokens)
     );
     if unpriced > 0 {
-        println!("( {} sessions had unpriced models — counted as $0 )", unpriced);
+        println!(
+            "( {} sessions had unpriced models — counted as $0 )",
+            unpriced
+        );
     }
 
     let by_source: Vec<(&'static str, f64, u64)> = {
@@ -67,7 +70,7 @@ pub fn print_table(sessions: Vec<Session>, days: i64) -> anyhow::Result<()> {
 
     // waste: redundant file re-reads
     let mut waste: Vec<&Session> = sessions.iter().filter(|s| s.reread_extras > 0).collect();
-    waste.sort_by(|a, b| b.reread_extras.cmp(&a.reread_extras));
+    waste.sort_by_key(|s| std::cmp::Reverse(s.reread_extras));
     if !waste.is_empty() {
         println!("\ntop waste (agent re-reading the same file):");
         for s in waste.iter().take(5) {
@@ -77,7 +80,10 @@ pub fn print_table(sessions: Vec<Session>, days: i64) -> anyhow::Result<()> {
                 s.source,
                 s.model.chars().take(16).collect::<String>(),
                 s.reread_extras,
-                short_cwd(&s.top_reread_file).chars().take(30).collect::<String>(),
+                short_cwd(&s.top_reread_file)
+                    .chars()
+                    .take(30)
+                    .collect::<String>(),
                 s.top_reread_count,
                 s.cost_usd
             );
@@ -85,21 +91,26 @@ pub fn print_table(sessions: Vec<Session>, days: i64) -> anyhow::Result<()> {
     }
 
     let mut ranked: Vec<&Session> = sessions.iter().collect();
-    ranked.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.sort_by(|a, b| {
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     println!();
     println!(
-        "{:<12} {:<7} {:<18} {:>10} {:>11} {:>8}  {}",
-        "WHEN", "SRC", "MODEL", "COST", "TOKENS", "RE-READ%", "CWD"
+        "{:<12} {:<7} {:<18} {:>10} {:>11} {:>7} {:>8}  CWD",
+        "WHEN", "SRC", "MODEL", "COST", "TOKENS", "CACHE%", "RE-READS"
     );
     for s in ranked.iter().take(15) {
         println!(
-            "{:<12} {:<7} {:<18} {:>10.2} {:>11} {:>7.0}%  {}",
+            "{:<12} {:<7} {:<18} {:>10.2} {:>11} {:>6.0}% {:>8}  {}",
             fmt_date(s.started),
             s.source,
             s.model.chars().take(18).collect::<String>(),
             s.cost_usd,
             s.total_tokens(),
-            s.reread_share() * 100.0,
+            s.cache_share() * 100.0,
+            s.reread_extras,
             short_cwd(&s.cwd).chars().take(40).collect::<String>()
         );
     }

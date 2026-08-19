@@ -1,0 +1,11 @@
+ffconcat version 1.0
+file 'frame-0.png'
+duration 0.8
+file 'frame-1.png'
+duration 0.9
+file 'frame-2.png'
+duration 1.2
+file 'frame-3.png'
+duration 7.1
+file 'frame-3.png'
+duration 0.1

@@ -1,8 +1,8 @@
 [package]
 name = "burnrate"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "htop for coding-agent spend: see what Claude Code, Codex, Cursor & friends actually cost you."
+description = "htop for coding-agent spend: see what Claude Code and Codex actually cost you."
 license = "MIT"
 repository = "https://github.com/zenovis2-create/burnrate"
 

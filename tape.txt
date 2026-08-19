@@ -1,0 +1,17 @@
+Output ./assets/demo.gif
+
+Set Shell "powershell"
+Set Theme "TokyoNight"
+Set FontFamily "Cascadia Mono"
+Set FontSize 14
+Set Width 1140
+Set Height 560
+Set Padding 8
+Set WindowBar "Colorful"
+Set WindowBarSize 36
+Set Framerate 10
+
+Type "burnrate --demo tui" Sleep 45ms  Enter
+Sleep 10s
+Type "q" Sleep 50ms  Enter
+Sleep 1s
