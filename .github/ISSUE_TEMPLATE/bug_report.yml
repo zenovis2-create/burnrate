@@ -1,0 +1,36 @@
+name: Bug report
+description: Something in burnrate is wrong or crashes
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: |
+        The exact command you ran (e.g. `burnrate report --days 7`),
+        the harness involved (Claude Code / Codex), and a redacted snippet
+        of the log line that breaks. One session's worth is plenty —
+        no need to paste whole logs.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: burnrate version
+      description: Output of `burnrate --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [macOS, Linux, Windows]
+    validations:
+      required: true

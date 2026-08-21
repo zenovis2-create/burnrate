@@ -3,15 +3,18 @@
 [![CI](https://github.com/zenovis2-create/burnrate/actions/workflows/ci.yml/badge.svg)](https://github.com/zenovis2-create/burnrate/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/zenovis2-create/burnrate)](https://github.com/zenovis2-create/burnrate/releases/latest)
 
-**`htop` for coding-agent spend.** See what Claude Code and Codex cost, which
-sessions burn the most tokens, and where agents keep reading the same files.
+**`htop` for coding-agent spend.** One local Rust binary that reads your
+Claude Code and Codex logs and shows exactly where the money went: which
+sessions cost the most, how much hit the prompt cache, and which files your
+agent kept re-reading for nothing.
 
 ![burnrate terminal demo](assets/demo.gif)
 
-Local-only: burnrate reads the logs already on your machine. Nothing is uploaded.
-
-If burnrate helps you catch an expensive agent loop, please **star the repo** so
-other builders can find it.
+| | |
+|---|---|
+| **Install** | `cargo install --git https://github.com/zenovis2-create/burnrate` (or [prebuilt binaries](https://github.com/zenovis2-create/burnrate/releases/latest)) |
+| **Privacy** | local-only — no telemetry, no network calls, logs never leave your machine |
+| **License** | MIT, zero runtime dependencies |
 
 ## Install
 
@@ -19,17 +22,23 @@ other builders can find it.
 cargo install --git https://github.com/zenovis2-create/burnrate
 ```
 
-Prebuilt macOS, Linux, and Windows binaries are available on the
+Prebuilt macOS, Linux, and Windows binaries are on the
 [latest release](https://github.com/zenovis2-create/burnrate/releases/latest).
+
+No Rust toolchain? The demo mode runs on synthetic, privacy-safe data:
+
+```sh
+burnrate --demo report
+```
 
 ## Use
 
 ```sh
-burnrate report     # sessions ranked by estimated cost
-burnrate report --json > burnrate.json # machine-readable report
-burnrate tui        # interactive terminal dashboard
-burnrate --days 30  # widen the window
-burnrate --demo tui # try it with synthetic, privacy-safe data
+burnrate report            # sessions ranked by estimated cost
+burnrate report --json     # machine-readable report
+burnrate tui               # interactive terminal dashboard
+burnrate --days 30         # widen the window
+burnrate --demo tui        # try it with synthetic, privacy-safe data
 ```
 
 burnrate automatically reads:
@@ -51,14 +60,35 @@ intended for shell scripts, scheduled snapshots, and custom dashboards.
 
 ## What it shows
 
-- estimated API-rate cost by session and harness
+- estimated API-rate cost per session and per harness
 - input, cached-input, and output token totals
 - cache-write token totals when reported by the harness
 - cache share (reported separately from waste)
-- redundant Claude Code `Read` tool calls and the worst repeated file
-- the most expensive sessions first
+- redundant Claude Code `Read` calls and the worst repeated file
+  (one real Codex session measured **97% of file-read volume as redundant
+  re-reads of the same file**)
+- most expensive sessions first
 
-## Support
+## Why not just ccusage?
+
+ccusage and CodeBurn tell you **how much** you spent, by day or model. They
+don't tell you **why**: which session, which model switch, which files the
+agent re-read in a loop. burnrate is the drill-down layer — point it at the
+same logs and get per-session cost, cache share, and repeated-file waste in
+one screen.
+
+| | burnrate | ccusage | CodeBurn |
+|---|---|---|---|
+| Per-session cost ranking | yes | partial (by model/day) | yes |
+| Prompt-cache share per session | yes | yes | no |
+| Redundant file re-reads (waste detection) | yes | no | no |
+| Interactive TUI | yes | no | yes |
+| Single native binary, no Node runtime | yes | no (npx/node) | no (npx/node) |
+| Harnesses | Claude Code, Codex | many | many |
+
+They answer different questions; use both.
+
+## Support matrix
 
 | Harness | Spend | Cache | Repeated file reads |
 | --- | --- | --- | --- |
@@ -77,7 +107,7 @@ rate. Claude sessions that switch models are priced per model and display the
 model responsible for the most tokens. Codex rollout files may repeat
 cumulative totals across forked threads.
 
-Parsing happens locally and burnrate has no telemetry or network client.
+Parsing happens locally; burnrate has no telemetry and no network client.
 
 ## What this is not
 
@@ -88,9 +118,20 @@ Parsing happens locally and burnrate has no telemetry or network client.
 
 ## Roadmap
 
-- Cursor and Gemini CLI parsers
-- editable price table
-- package-manager installs
+- **Cursor and Gemini CLI parsers** (highest demand — PRs welcome)
+- Redundant re-read detection for Codex
+- Editable price table (JSON)
+- Package-manager installs (brew, cargo-binstall)
+
+If burnrate catches an expensive loop in your logs, a star helps other
+builders find it.
+
+## Contributing
+
+Issues: use the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or
+[feature request](.github/ISSUE_TEMPLATE/feature_request.yml) templates.
+For parser bugs, attach a **redacted** snippet of the log line that breaks —
+one session's worth is plenty, no need to paste whole logs.
 
 ## Development
 

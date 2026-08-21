@@ -1,0 +1,11 @@
+name: Question
+description: Usage question — not a bug or a feature request
+labels: [question]
+body:
+  - type: textarea
+    id: q
+    attributes:
+      label: Your question
+      description: What are you trying to do, and what have you tried? Include the exact command output if it's short enough to paste.
+    validations:
+      required: true

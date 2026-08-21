@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an improvement or a new harness parser
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do or measure that burnrate can't do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work? A rough sketch is fine.
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence of demand (optional)
+      description: Links to threads, issues in other repos, or your own logs that motivated this.
+    validations:
+      required: false
