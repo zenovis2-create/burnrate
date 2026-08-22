@@ -10,6 +10,9 @@ agent kept re-reading for nothing.
 
 ![burnrate terminal demo](assets/demo.gif)
 
+_Recorded from the real TUI with the built-in synthetic dataset; no user logs
+are shown._
+
 | | |
 |---|---|
 | **Install** | `cargo install --git https://github.com/zenovis2-create/burnrate` (or [prebuilt binaries](https://github.com/zenovis2-create/burnrate/releases/latest)) |
@@ -65,28 +68,31 @@ intended for shell scripts, scheduled snapshots, and custom dashboards.
 - cache-write token totals when reported by the harness
 - cache share (reported separately from waste)
 - redundant Claude Code `Read` calls and the worst repeated file
-  (one real Codex session measured **97% of file-read volume as redundant
-  re-reads of the same file**)
+  (a separate manual analysis measured **97% of file-read volume as redundant
+  re-reads of the same file** in one real Codex session; automatic Codex
+  re-read detection is not yet supported)
 - most expensive sessions first
 
-## Why not just ccusage?
+## How it compares
 
-ccusage and CodeBurn tell you **how much** you spent, by day or model. They
-don't tell you **why**: which session, which model switch, which files the
-agent re-read in a loop. burnrate is the drill-down layer — point it at the
-same logs and get per-session cost, cache share, and repeated-file waste in
-one screen.
+[ccusage](https://github.com/ccusage/ccusage) is a broad multi-harness reporter
+with daily, weekly, monthly, and session views.
+[CodeBurn](https://github.com/getagentseal/codeburn) covers more tools and adds
+terminal, desktop, web, and optimization surfaces. burnrate is deliberately
+narrower: one native CLI binary and one fast path from session cost to
+within-session Claude Code re-read waste.
 
 | | burnrate | ccusage | CodeBurn |
 |---|---|---|---|
-| Per-session cost ranking | yes | partial (by model/day) | yes |
-| Prompt-cache share per session | yes | yes | no |
-| Redundant file re-reads (waste detection) | yes | no | no |
+| Per-session cost reporting | yes | yes | yes |
+| Cache metrics | share + tokens per session | cache read/write tokens | cache hit per row |
+| Dedicated re-read waste analysis | within-session (Claude Code) | not documented | yes (`optimize`) |
 | Interactive TUI | yes | no | yes |
-| Single native binary, no Node runtime | yes | no (npx/node) | no (npx/node) |
-| Harnesses | Claude Code, Codex | many | many |
+| Default CLI runtime | native Rust binary | `npx` / other package runners | Node.js 22.13+ |
+| Sources documented (August 2026) | 2 | 15 | 41 |
 
-They answer different questions; use both.
+Choose the broader tools when source coverage or extra surfaces matter more;
+choose burnrate when a small native binary and focused drill-down are the goal.
 
 ## Support matrix
 
