@@ -8,11 +8,12 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
     Terminal,
 };
 
-use crate::sources::Session;
+use crate::sources::{ScanDiagnostics, Session};
+use chrono::{DateTime, Utc};
 
 fn short_name(path: &str) -> String {
     std::path::Path::new(path)
@@ -55,9 +56,16 @@ fn move_selection(state: &mut TableState, len: usize, delta: isize) {
     state.select(Some(next));
 }
 
-pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
+fn summary_panel(
+    sessions: &[Session],
+    days: i64,
+    snapshot: DateTime<Utc>,
+    diagnostics: Option<&ScanDiagnostics>,
+) -> Paragraph<'static> {
     let total_cost: f64 = sessions.iter().map(|s| s.cost_usd).sum();
-    let redundant_reads: u64 = sessions.iter().map(|s| s.reread_extras).sum();
+    let unpriced = sessions.iter().filter(|s| !s.priced).count();
+    let unpriced_tokens: u64 = sessions.iter().map(|s| s.unpriced_tokens).sum();
+    let repeated_reads: u64 = sessions.iter().map(|s| s.reread_extras).sum();
     let total_input: u64 = sessions.iter().map(Session::total_input_tokens).sum();
     let cached_input: u64 = sessions.iter().map(|s| s.cache_read_tokens).sum();
     let cache_pct = if total_input == 0 {
@@ -65,13 +73,54 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
     } else {
         cached_input as f64 / total_input as f64 * 100.0
     };
-    let top_offender = sessions
+    let top_file = sessions
         .iter()
         .filter(|s| s.top_reread_count > 1)
         .max_by_key(|s| s.top_reread_count)
         .map(|s| format!("{} x{}", short_name(&s.top_reread_file), s.top_reread_count))
         .unwrap_or_else(|| "none detected".into());
+    Paragraph::new(vec![
+        Line::styled(
+            format!("${total_cost:.2} known subtotal (API-rate est.)"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(format!(
+            "Unpriced: {unpriced} sessions / {unpriced_tokens} tokens (+? means unknown, not free)"
+        )),
+        Line::raw("Actual bill and provider quota: not observed"),
+        Line::raw(format!(
+            "Snapshot: {} (not live)",
+            snapshot.format("%Y-%m-%d %H:%M:%S UTC")
+        )),
+        Line::raw(format!(
+            "Scope: full-session totals; active in last {days} days"
+        )),
+        Line::raw(
+            diagnostics
+                .map(ScanDiagnostics::summary)
+                .unwrap_or_else(|| "Synthetic demo — no local logs scanned".into()),
+        ),
+        Line::raw(format!(
+            "Repeated reads: {repeated_reads} (not proof of waste) | cached input: {cache_pct:.0}%"
+        )),
+        Line::raw(format!("Most re-read: {top_file}")),
+    ])
+    .wrap(Wrap { trim: false })
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" burnrate — local estimate snapshot "),
+    )
+}
 
+pub fn run(
+    sessions: Vec<Session>,
+    days: i64,
+    snapshot: DateTime<Utc>,
+    diagnostics: Option<&ScanDiagnostics>,
+) -> anyhow::Result<()> {
     let mut ranked: Vec<&Session> = sessions.iter().collect();
     ranked.sort_by(|a, b| {
         b.cost_usd
@@ -101,59 +150,26 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
             let areas = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(5),
+                    Constraint::Length(12),
                     Constraint::Min(6),
                     Constraint::Length(3),
                 ])
                 .split(frame.area());
 
-            let summary = Paragraph::new(vec![
-                Line::from(vec![
-                    Span::styled(
-                        format!("  ${total_cost:.2}"),
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled("  spent", Style::default().fg(Color::Gray)),
-                    Span::raw("     "),
-                    Span::styled(
-                        format!("{redundant_reads}"),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled("  redundant reads", Style::default().fg(Color::Gray)),
-                    Span::raw("     "),
-                    Span::styled(
-                        format!("{cache_pct:.0}%"),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled("  cached input", Style::default().fg(Color::Gray)),
-                ]),
-                Line::from(vec![
-                    Span::styled("  top offender  ", Style::default().fg(Color::Gray)),
-                    Span::styled(
-                        top_offender.clone(),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-            ])
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(Span::styled(
-                        " burnrate — htop for coding-agent spend ",
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                    )),
+            frame.render_widget(
+                summary_panel(&sessions, days, snapshot, diagnostics),
+                areas[0],
             );
-            frame.render_widget(summary, areas[0]);
 
             let header = Row::new([
-                "ACTIVE", "SRC", "MODEL", "COST", "TOKENS", "CACHE", "RE-READS", "PROJECT",
+                "ACTIVE",
+                "SRC",
+                "MODEL",
+                "EST. COST",
+                "TOKENS",
+                "CACHE",
+                "RE-READS",
+                "PROJECT",
             ])
             .style(
                 Style::default()
@@ -180,7 +196,7 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
                     Cell::from(when),
                     Cell::from(s.source),
                     Cell::from(s.model.chars().take(18).collect::<String>()),
-                    Cell::from(format!("${:.2}", s.cost_usd)).style(cost_style),
+                    Cell::from(s.cost_label()).style(cost_style),
                     Cell::from(human_tokens(s.total_tokens())),
                     Cell::from(format!("{:.0}%", s.cache_share() * 100.0)),
                     Cell::from(s.reread_extras.to_string()).style(reread_style),
@@ -193,7 +209,7 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
                     Constraint::Length(12),
                     Constraint::Length(7),
                     Constraint::Length(19),
-                    Constraint::Length(9),
+                    Constraint::Length(12),
                     Constraint::Length(9),
                     Constraint::Length(7),
                     Constraint::Length(10),
@@ -213,7 +229,10 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::DarkGray))
-                    .title(format!(" {} sessions · ranked by cost ", sessions.len())),
+                    .title(format!(
+                        " {} sessions · ranked by known subtotal ",
+                        sessions.len()
+                    )),
             );
             frame.render_stateful_widget(table, areas[1], &mut table_state);
 
@@ -259,6 +278,52 @@ pub fn run(sessions: Vec<Session>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_panel_discloses_unpriced_usage_and_read_errors() {
+        use ratatui::backend::TestBackend;
+        let now = Utc::now();
+        let mut sessions = crate::sources::demo_sessions(now);
+        sessions[0].priced = false;
+        sessions[0].unpriced_tokens = 120;
+        sessions[0].top_reread_file = format!("/tmp/{}", "long-name".repeat(50));
+        let diagnostics = ScanDiagnostics {
+            io_errors: 1,
+            malformed_lines: 2,
+            ..Default::default()
+        };
+        for width in [80, 90, 120] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 12)).unwrap();
+            terminal
+                .draw(|frame| {
+                    frame.render_widget(
+                        summary_panel(&sessions, 7, now, Some(&diagnostics)),
+                        frame.area(),
+                    )
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let rendered = (1..11)
+                .map(|y| {
+                    (1..width - 1)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(rendered.contains("known subtotal (API-rate est.)"));
+            assert!(rendered.contains("Unpriced: 1 sessions / 120 tokens"));
+            assert!(rendered.contains("not observed"));
+            assert!(rendered.contains("not live"));
+            assert!(rendered.contains("Scan (partial input)"));
+            assert!(rendered.contains("1 I/O errors"));
+            assert!(rendered.contains("2 malformed lines"));
+            assert!(!rendered.contains("spent"));
+        }
+    }
 
     #[test]
     fn selection_is_clamped_to_the_available_rows() {
