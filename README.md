@@ -4,9 +4,9 @@
 [![Latest release](https://img.shields.io/github/v/release/zenovis2-create/burnrate)](https://github.com/zenovis2-create/burnrate/releases/latest)
 
 **`htop` for coding-agent spend.** One local Rust binary that reads your
-Claude Code and Codex logs and shows exactly where the money went: which
-sessions cost the most, how much hit the prompt cache, and which files your
-agent kept re-reading for nothing.
+Claude Code and Codex logs and shows estimated API-rate costs, prompt cache
+usage, and repeated file reads. Unknown pricing and incomplete input stay
+visible; these are local estimates, not your bill.
 
 ![burnrate terminal demo](assets/demo.gif)
 
@@ -51,6 +51,9 @@ burnrate automatically reads:
 
 The `--days` window follows each session log's latest filesystem activity, so a
 long-running session is not dropped just because it started before the window.
+Totals include that session's entire recorded usage, **not just events inside
+the window**. The TUI is a snapshot, not a live watcher; its timestamp shows when
+the snapshot was collected. Relaunch it to rescan.
 
 In the TUI, use the arrow keys or `j`/`k` to move, Page Up/Page Down to jump,
 Home/End to reach the edges, and `q` or Escape to quit.
@@ -61,17 +64,34 @@ Home/End to reach the edges, and `q` or Escape to quit.
 aggregate totals, per-source totals, and cost-ranked session details. This is
 intended for shell scripts, scheduled snapshots, and custom dashboards.
 
+`cost_basis` identifies a standard-API-rate known subtotal. The existing
+`total_cost_usd` and per-session `cost_usd` fields retain their numeric shape;
+unknown usage is excluded from those subtotals, not priced as free.
+`unpriced_sessions`, `unpriced_tokens`, and `unpriced_models` disclose that gap.
+`billing_status` and `quota_status` are `not_observed`: local logs are not an
+invoice or a provider quota API. `window_basis` describes the activity-based
+selection above. `data_source` distinguishes local logs from the synthetic demo.
+
+The `scan` object reports roots found, recently touched JSONL files discovered,
+files opened, sessions parsed, opened files without recognized usage, I/O errors,
+and malformed JSON lines. Demo reports use `scan: null`, not fake scan counts.
+An opened file can still have read errors. Tables and the TUI mark scans with
+I/O or JSON errors as `partial input`. No detected errors is **not** a claim
+of complete coverage: valid but unsupported event shapes, deleted history,
+other devices, and fork duplication are not certified by these counters.
+
 ## What it shows
 
 - estimated API-rate cost per session and per harness
 - input, cached-input, and output token totals
 - cache-write token totals when reported by the harness
 - cache share (reported separately from waste)
-- redundant Claude Code `Read` calls and the worst repeated file
-  (a separate manual analysis measured **97% of file-read volume as redundant
-  re-reads of the same file** in one real Codex session; automatic Codex
-  re-read detection is not yet supported)
-- most expensive sessions first
+- repeated Claude Code `Read` tool calls and the most re-read file (a signal,
+  not proof of waste; ranges and intervening edits are not compared)
+  (a separate manual analysis reported **97% of file-read volume as re-reads
+  of the same file** in one real Codex session; automatic Codex re-read
+  detection is not yet supported, and this is not a general waste rate)
+- sessions ranked by known estimated subtotal
 
 ## How it compares
 
@@ -107,9 +127,11 @@ choose burnrate when a small native binary and focused drill-down are the goal.
 
 Costs are estimates from a small hardcoded price table, not invoice data. Log
 formats and provider prices change; verify important numbers against your bill.
-Recognized models use model-specific standard API rates; unrecognized usage is
-shown as unpriced and contributes $0 rather than borrowing another model's
-rate. Claude sessions that switch models are priced per model and display the
+Recognized models use model-specific standard API rates. Unrecognized usage
+remains unpriced instead of borrowing another model's rate. Table and TUI rows
+use `+?` to mark unknown cost alongside the known subtotal; `$0.00+?` does not
+mean free. Malformed records are counted and skipped, never used to infer a
+model price. Claude sessions that switch models are priced per model and display the
 model responsible for the most tokens. Codex rollout files may repeat
 cumulative totals across forked threads.
 
