@@ -10,7 +10,7 @@ repository = "https://github.com/zenovis2-create/burnrate"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
-dirs = "6"
+dirs = "7"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 crossterm = "0.29"
 serde = { version = "1", features = ["derive"] }
